@@ -4,9 +4,9 @@ import argparse
 
 def parse_args_eposide_train():
     parser = argparse.ArgumentParser(description='eposide_train')
-    parser.add_argument('--source_data_path', default='/data1/zhoufei/CDFSL/datasets/miniImagenet/train', help='train data path')
+    parser.add_argument('--source_data_path', default='./miniImage', help='train data path')
     parser.add_argument('--image_size'  , default=224, type=int,  help='image size')
-    parser.add_argument('--train_num_class' , default=64, type=int, help='total number of classes in in train class')
+    parser.add_argument('--train_num_class' , default=20, type=int, help='total number of classes in in train class')
     parser.add_argument('--list_of_out_dims', default=[64,128,256,512], help='every block output')
     parser.add_argument('--list_of_stride', default=[1,2,2,2], help='every block conv stride')
     parser.add_argument('--list_of_dilated_rate', default=[1,1,1,1], help='dilated conv') 
@@ -41,12 +41,12 @@ def parse_args_test():
     parser.add_argument('--list_of_stride', default=[1,2,2,2], help='every block conv stride')
     parser.add_argument('--list_of_dilated_rate', default=[1,1,1,1], help='dilated conv') 
     parser.add_argument('--n_way', default=5, type=int,  help='class num to classify for every task')
-    parser.add_argument('--n_support', default=5, type=int,  help='number of labeled data in each class, same as n_support') 
+    parser.add_argument('--n_support', default=1, type=int,  help='number of labeled data in each class, same as n_support')
     parser.add_argument('--n_query', default=15, type=int,  help='number of test data in each class, same as n_query') 
     parser.add_argument('--test_n_eposide', default=600, type=int, help ='total task every epoch') 
     parser.add_argument('--seed', type=int, default=1111, help='random seed')
-    parser.add_argument('--current_data_path', default='/data0/datasets/ISIC', help='ISIC_data_path')
-    parser.add_argument('--current_class', default=7, type=int, help='total number of classes in ISIC')
+    parser.add_argument('--current_data_path', default='./cub_data_50', help='ISIC_data_path')
+    parser.add_argument('--current_class', default=50, type=int, help='total number of classes in ISIC')
     parser.add_argument('--pretrain_model_path', default='./pretrain/399.tar', help='pretrain_model_path')
     parser.add_argument('--model_path', default='./checkpoint/100.tar', help='model_path')
     

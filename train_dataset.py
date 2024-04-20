@@ -1,3 +1,4 @@
+import PIL.Image as Image
 import torch
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
@@ -9,17 +10,18 @@ from PIL import ImageFilter
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 identity = lambda x:x
-transformtypedict=dict(Brightness=ImageEnhance.Brightness, Contrast=ImageEnhance.Contrast, Sharpness=ImageEnhance.Sharpness, Color=ImageEnhance.Color)
+transformTypeDict=dict(Brightness=ImageEnhance.Brightness, Contrast=ImageEnhance.Contrast, Sharpness=ImageEnhance.Sharpness, Color=ImageEnhance.Color)
 
-class ImageJitter(object):
-    def __init__(self, transformdict):
-        self.transforms = [(transformtypedict[k], transformdict[k]) for k in transformdict]
+class ImageJitter(object): # 图像强化
+    def __init__(self, transformDict):
+        self.transforms = [(transformTypeDict[k], transformDict[k]) for k in transformDict]
         
     def __call__(self, img):
         out = img
-        randtensor = torch.rand(len(self.transforms))
+        # 生成一个随机张量，用于决定图像强化的程度
+        randTensor = torch.rand(len(self.transforms))
         for i, (transformer, alpha) in enumerate(self.transforms):
-            r = alpha*(randtensor[i]*2.0 -1.0) + 1
+            r = alpha*(randTensor[i]*2.0 -1.0) + 1
             out = transformer(out).enhance(r).convert('RGB')
         return out
 
@@ -57,33 +59,68 @@ class SetDataset:
         self.data_path = data_path
         self.num_class = num_class
         self.cl_list = range(self.num_class)
+
+        print("==> Start to create sub meta data -- SetDataset")
+
         for cl in self.cl_list:
             self.sub_meta[cl] = []
-        d = ImageFolder(self.data_path)
-        for i, (data, label) in enumerate(d):
-            self.sub_meta[label].append(data)
-        for key, item in self.sub_meta.items():
-            print (len(self.sub_meta[key]))
-    
-        self.sub_dataloader = [] 
+        # ImageFolder 自动按照文件夹组织数据,并且自动分配类别标签
+
+        print("==> Using ImageFolder dataset")
+        img_data = ImageFolder(self.data_path)
+        print("==> Finish ImageFolder dataset")
+
+        for i, (path, label) in enumerate(img_data.imgs):
+            # if i % 1000 == 0:
+            #     print("==> Loading data: {}/{}".format(i, len(img_data)))
+            #     print(path)
+            self.sub_meta[label].append(path)
+
+
+        # print("===> Test1")
+        # for key, _ in self.sub_meta.items():
+        #     print(len(self.sub_meta[key]))
+        # print("===> Test2")
+
+        self.sub_dataloader = []
+        # 子数据集迭代器
+        self.iter_sub_dataloader = []
+
+        print("==> Start to create sub dataset -- SubDataset")
+
         sub_data_loader_params = dict(batch_size = batch_size,
                                   shuffle = True,
                                   num_workers = 0, #use main thread only or may receive multiple batches
                                   pin_memory = False)        
         for cl in self.cl_list:
-            sub_dataset = SubDataset(self.sub_meta[cl])
-            self.sub_dataloader.append(torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params))
+            sub_dataset = SubDataset(self.sub_meta[cl],target=cl)
+            dataloadr = torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params)
+            self.sub_dataloader.append(dataloadr)
+            # 创建子数据集的迭代器
+            self.iter_sub_dataloader.append(iter(dataloadr))
+            # self.sub_dataloader.append(torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params))
+
+        print("==> Finish creating sub dataset -- SubDataset")
 
     def __getitem__(self, i):
-        return next(iter(self.sub_dataloader[i]))
+        # 在下次迭代中将自动获取 sub_dataloader[i] 的下一个元素
+        try:
+            # 尝试获取当前迭代器的下一个元素
+            data = next(self.iter_sub_dataloader[i])
+        except StopIteration:
+            # 当迭代器已经迭代完毕时，重新创建迭代器并获取第一个元素
+            self.iter_sub_dataloader[i] = iter(self.sub_dataloader[i])
+            data = next(self.iter_sub_dataloader[i])
+        return data
 
     def __len__(self):
         return len(self.sub_dataloader)
 
-
+# subdataset 子数据集
 class SubDataset:
     def __init__(self, 
-        sub_meta, 
+        sub_meta,
+        target,
         size_crops=[224, 96],
         nmb_crops=[2, 6],
         min_scale_crops=[0.14, 0.05],
@@ -98,10 +135,12 @@ class SubDataset:
         std = [0.229, 0.224, 0.225]
         trans = []
         for i in range(len(size_crops)):
+            # scale参数 指定裁剪区域的面积占原图像的面积的比例范围
             randomresizedcrop = transforms.RandomResizedCrop(
-                size_crops[i],
+                size_crops[i], # 224 or 96
                 scale=(min_scale_crops[i], max_scale_crops[i]),
             )
+            # 对不同组数据产生不同的裁剪结果
             trans.extend([transforms.Compose([
                 randomresizedcrop,
                 transforms.RandomHorizontalFlip(p=0.5),
@@ -116,20 +155,24 @@ class SubDataset:
         self.global_transforms = transforms.Compose([
                 transforms.Resize([224,224]),
                 ImageJitter(self.jitter_param),
-                transforms.RandomHorizontalFlip(),
+                transforms.RandomHorizontalFlip(), # 随机水平翻转 以0.5的概率
                 transforms.ToTensor(),
                 transforms.Normalize(mean=mean, std=std)])
         
         self.sub_meta = sub_meta
+        self.target = target
         
     def __getitem__(self,i):
-        
-        img = self.sub_meta[i] 
+
+        img = Image.open(self.sub_meta[i]).convert('RGB')
+        # img = self.sub_meta[i]
+        # 对原数据进行裁剪 并添加原图像
+        # multi_crops将包含8张经过不同裁剪和处理的图片
         multi_crops = list(map(lambda trans: trans(img), self.trans))
         raw_image = self.global_transforms(img)
         multi_crops.append(raw_image)
         
-        return multi_crops
+        return multi_crops, self.target # 返回8张图片和对应的标签
 
 
     def __len__(self):
@@ -149,7 +192,7 @@ class EpisodicBatchSampler(object):
         for i in range(self.n_episodes):
             yield torch.randperm(self.n_classes)[:self.n_way]
 
-class Eposide_DataManager():
+class Eposide_DataManager(): # 轮次数据管理器
     def __init__(self, data_path, num_class, n_way=5, n_support=1, n_query=15, n_eposide=1):        
         super(Eposide_DataManager, self).__init__()
         self.data_path = data_path
@@ -157,11 +200,12 @@ class Eposide_DataManager():
         self.n_way = n_way
         self.batch_size = n_support + n_query
         self.n_eposide = n_eposide
+        print("==> Eposide_DataManager: %d-way %d-shot %d-query %d-eposide" % (n_way, n_support, n_query, n_eposide))
 
     def get_data_loader(self): 
         dataset = SetDataset(self.data_path, self.num_class, self.batch_size)
         sampler = EpisodicBatchSampler(len(dataset), self.n_way, self.n_eposide)  
-        data_loader_params = dict(batch_sampler=sampler, num_workers=12, pin_memory=True)   
+        data_loader_params = dict(batch_sampler=sampler, num_workers=0, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(dataset, **data_loader_params)
         return data_loader
 

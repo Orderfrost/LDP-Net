@@ -5,6 +5,9 @@ import torch.nn as nn
 def euclidean_dist(x, y):
     # x: N x D
     # y: M x D
+
+    # (way, 512)
+    # (7 * 5 * 15, 512)
     n = x.size(0)
     m = y.size(0)
     d = x.size(1)
@@ -30,3 +33,4 @@ if __name__=='__main__':
     y = torch.rand(75,512)
     scores = model(x, y)
     print(scores.size())
+    print("scores: ", scores)

@@ -3,6 +3,7 @@ import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 from PIL import ImageFile
 from PIL import ImageEnhance
+import PIL.Image as Image
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 identity = lambda x:x
@@ -31,22 +32,51 @@ class SetDataset:
         self.cl_list = range(self.num_class)
         for cl in self.cl_list:
             self.sub_meta[cl] = []
-        d = ImageFolder(self.data_path)
-        for i, (data, label) in enumerate(d):
+
+        img_data = ImageFolder(self.data_path)
+        for i, (data, label) in enumerate(img_data.imgs):
+            # print("label is: ", label)
             self.sub_meta[label].append(data)
 
-    
-        self.sub_dataloader = [] 
+        self.sub_dataloader = []
+        # 子数据集迭代器
+        self.iter_sub_dataloader = []
+
         sub_data_loader_params = dict(batch_size = batch_size,
-                                  shuffle = True,
-                                  num_workers = 0, #use main thread only or may receive multiple batches
-                                  pin_memory = False)        
+                                        shuffle = True,
+                                        num_workers = 0, #use main thread only or may receive multiple batches
+                                        pin_memory = False,
+                                        drop_last = True,)
+
+
         for cl in self.cl_list:
             sub_dataset = SubDataset(self.sub_meta[cl], cl, transform=transform)
-            self.sub_dataloader.append(torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params))
+            # self.sub_dataloader.append(torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params))
+            dataloadr = torch.utils.data.DataLoader(sub_dataset, **sub_data_loader_params,)
+            # print("class %d len of the dataloader is %d" % (cl, len(dataloadr)))
+            if cl == 4:
+                print("len of the dataloader is ", len(dataloadr))
+
+                for i, (data, target) in enumerate(dataloadr):
+                    print("classe 3 epoch: 　", i)
+                    print("data shape is ", data.shape)
+                    print("target is ", target)
+                    break
+            self.sub_dataloader.append(dataloadr)
+            # 创建子数据集的迭代器
+            self.iter_sub_dataloader.append(iter(dataloadr))
 
     def __getitem__(self, i):
-        return next(iter(self.sub_dataloader[i]))
+        # 在下次迭代中将自动获取 sub_dataloader[i] 的下一个元素
+        try:
+            # 尝试获取当前迭代器的下一个元素
+            # print("len of the dataloader is ", len(self.sub_dataloader[i]))
+            data = next(self.iter_sub_dataloader[i])
+        except StopIteration:
+            # 当迭代器已经迭代完毕时，重新创建迭代器并获取第一个元素
+            self.iter_sub_dataloader[i] = iter(self.sub_dataloader[i])
+            data = next(self.iter_sub_dataloader[i])
+        return data
 
     def __len__(self):
         return len(self.sub_dataloader)
@@ -58,9 +88,10 @@ class SubDataset:
         self.transform = transform
         self.target_transform = target_transform
 
-    def __getitem__(self,i):
 
-        img = self.transform(self.sub_meta[i])
+    def __getitem__(self,i):
+        img = Image.open(self.sub_meta[i]).convert('RGB')
+        img = self.transform(img)
         target = self.target_transform(self.cl)
         return img, target
 
@@ -78,6 +109,7 @@ class EpisodicBatchSampler(object):
 
     def __iter__(self):
         for i in range(self.n_episodes):
+            #
             yield torch.randperm(self.n_classes)[:self.n_way]
     
 
@@ -98,7 +130,7 @@ class TransformLoader:
             return method(self.image_size) 
         elif transform_type=='CenterCrop':
             return method(self.image_size) 
-        elif transform_type=='Scale':
+        elif transform_type=='Resize':
             return method([int(self.image_size*1.15), int(self.image_size*1.15)])
         elif transform_type=='Normalize':
             return method(**self.normalize_param )
@@ -109,7 +141,7 @@ class TransformLoader:
         if aug:
             transform_list = ['RandomSizedCrop', 'ImageJitter', 'RandomHorizontalFlip', 'ToTensor', 'Normalize']
         else:
-            transform_list = ['Scale','CenterCrop', 'ToTensor', 'Normalize']
+            transform_list = ['Resize','CenterCrop', 'ToTensor', 'Normalize']
         transform_funcs = [ self.parse_transform(x) for x in transform_list]
         transform = transforms.Compose(transform_funcs)
         return transform
@@ -129,7 +161,7 @@ class Eposide_DataManager():
         transform = self.trans_loader.get_composed_transform(aug)
         dataset = SetDataset(self.data_path, self.num_class, self.batch_size, transform)
         sampler = EpisodicBatchSampler(len(dataset), self.n_way, self.n_eposide)  
-        data_loader_params = dict(batch_sampler=sampler, num_workers=12, pin_memory=True)       
+        data_loader_params = dict(batch_sampler=sampler, num_workers=0, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(dataset, **data_loader_params)
         return data_loader
 
